@@ -1,0 +1,1415 @@
+---
+title: "Mouse skin peptidomic analysis of the hemorrhage induced by a snake venom metalloprotease."
+author: "Amanda F. Asega, Bianca C. S. C. Barros, Alison F. A. Chaves, Ana K. Oliveira, Luciana Bertholim, Eduardo S. Kitano, Solange M. T. Serrano"
+execute: 
+  echo: true
+  warning: false
+  message: false
+type: "html"
+code-fold: true
+---
+## Description of the data
+This reproducible markdown file allows you to explore the data presented in the paper entitled "mouse skin peptidomic analysis of the hemorrhage induced by a snake venom metalloprotease". All files used here are available with this Markdown file in the GitHub repository (https://github.com/41ison). Remember that the data presented here is only a subset of the data used in the paper. The full dataset is available in the ProteomeXchange repository with the accession number PXD041460. Before you start, please make sure you have the following packages installed in your R environment:
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(VennDiagram)
+library(eulerr)
+library(kableExtra)
+library(pheatmap)
+library(igraph)
+library(rstatix)
+
+# Setting a common theme for the plots
+theme_set(theme_classic())
+```
+
+# load data from psm.tsv files from FragPipe search
+First we load the psm.tsv file and filter out all psm containing 0 in the column intensity. Then, we flag each psm with their respective sample name. Finally, we combine all samples in a single dataset so we can compare them.
+
+```{r}
+FP_c1 <- read_tsv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/tabelasfragpipeamanda/C1_psm_Amanda.tsv") %>%
+    clean_names() %>%
+    filter(intensity != 0)
+FP_c1$Sample <- "Control 1"
+
+FP_c2 <- read_tsv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/tabelasfragpipeamanda/C2_psm_Amanda.tsv") %>%
+    clean_names() %>%
+    filter(intensity != 0)
+FP_c2$Sample <- "Control 2"
+
+FP_c3 <- read_tsv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/tabelasfragpipeamanda/C3_psm_Amanda.tsv") %>%
+    clean_names() %>%
+    filter(intensity != 0)
+FP_c3$Sample <- "Control 3"
+
+# binding all the control samples in a single dataset
+FP_controls <- bind_rows(FP_c1, FP_c2, FP_c3)
+
+# Cleaning the names in the entry_name column
+FP_controls$entry_name <- gsub("_MOUSE", "", FP_controls$entry_name)
+
+# write.xlsx(FP_controls, "FP_controls.xlsx")
+
+FP_t1 <- read_tsv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/tabelasfragpipeamanda/T1_psm_Amanda.tsv") %>%
+    clean_names() %>%
+    filter(intensity != 0)
+FP_t1$Sample <- "HF3-treated 1"
+
+FP_t2 <- read_tsv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/tabelasfragpipeamanda/T2_psm_Amanda.tsv") %>%
+    clean_names() %>%
+    filter(intensity != 0)
+FP_t2$Sample <- "HF3-treated 2"
+
+FP_t3 <- read_tsv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/tabelasfragpipeamanda/T3_psm_Amanda.tsv") %>%
+    clean_names() %>%
+    filter(intensity != 0)
+FP_t3$Sample <- "HF3-treated 3"
+
+# binding all the HF3-treated samples in a single dataset
+FP_treated <- bind_rows(FP_t1, FP_t2, FP_t3)
+
+# Cleaning the names in the entry_name column
+FP_treated$entry_name <- gsub("_MOUSE", "", FP_treated$entry_name)
+
+# bind all the samples (control and HF3-treated) in a single dataset
+all_psm_data <- bind_rows(
+    FP_controls, FP_treated) %>%
+    mutate(Condition = ifelse(Sample %in% c("Control 1", "Control 2", "Control 3"), "Control", "HF3-treated"))
+
+all_psm_data$entry_name <- gsub("_MOUSE", "", all_psm_data$entry_name)
+# write.xlsx(FP_treated, "FP_treated.xlsx")
+```
+
+## Filtering the PSM file to keep only the PSM with the highest intensity among the duplicates
+
+```{r}
+peptide_control <- FP_controls %>%
+    group_by(peptide) %>%
+    filter(intensity == max(intensity)) %>%
+    filter(peptide_prophet_probability == max(peptide_prophet_probability)) %>%
+    ungroup()
+
+paste0("Number of unique peptides in the control group: ", table(duplicated(peptide_control$peptide)))
+
+peptide_treated <- FP_treated %>%
+    group_by(peptide) %>%
+    filter(intensity == max(intensity)) %>%
+    filter(peptide_prophet_probability == max(peptide_prophet_probability)) %>%
+    ungroup()
+
+paste0("Number of unique peptides in the HF3-treated group: ", table(duplicated(peptide_treated$peptide)))
+
+all_peptides_data <- bind_rows(
+    peptide_control,
+    peptide_treated) %>%
+    mutate(Condition = ifelse(Sample %in% c("Control 1", "Control 2", "Control 3"), "Control", "HF3-treated"))
+
+all_peptides_data$entry_name <- gsub("_MOUSE", "", all_peptides_data$entry_name)
+```
+
+# Comparing peptides in control and  peptide in HF3-treated samples to check intersections
+
+```{r}
+# compare FP_control and FP_treated to see if there are any peptides that are present in both
+common_peptides <- peptide_control %>%
+    filter(peptide %in% peptide_treated$peptide)
+
+paste0("Peptides in both control and HF3-treated samples: ", table(duplicated(common_peptides$peptide)))
+
+# compare peptide_control and peptide_treated to see if there are any peptides that are present only in the control
+unique_in_control_samples <- peptide_control %>%
+    filter(!(peptide %in% peptide_treated$peptide))
+
+paste0("Peptides only in the control samples: ", table(duplicated(unique_in_control_samples$peptide)))
+
+# compare peptide_control and peptide_treated to see if there are any peptides that are present only in the HF3-treated
+unique_in_treated_samples <- peptide_treated %>%
+    filter(!(peptide %in% peptide_control$peptide))
+
+paste0("Peptides only in the HF3-treated samples: ", table(duplicated(unique_in_treated_samples$peptide)))
+
+# write.xlsx(unique_in_control_samples, "unique_in_control_samples.xlsx")
+# write.xlsx(unique_in_treated_samples, "unique_in_treated_samples.xlsx")
+# write.xlsx(common_peptides, "common_peptides.xlsx")
+```
+
+# Non-normalized peptide intensities in the control and HF3-treated samples
+
+```{r}
+#| label: fig-peptide-intensity
+#| fig-cap: "Peptide intensity in the control and HF3-treated samples"
+#| fig.width: 12
+#| fig.height: 5
+F1 <- all_peptides_data %>%
+    ggplot(aes(
+        x = Sample,
+        y = log2(intensity),
+        fill = Condition
+    )) +
+    geom_boxplot() +
+    coord_flip() +
+    scale_fill_manual(values = c("#EFC000FF", "#CD534CFF")) +
+    theme(
+        axis.text.y = element_text(color = "black"),
+        axis.text.x = element_text(
+            angle = 90,
+            color = "black",
+            hjust = 1,
+            vjust = 0.5
+        ),
+        text = element_text(size = 35)
+    ) +
+    labs(
+        fill = NULL,
+        x = NULL,
+        y = "log2(intensity)"
+    )
+
+print(F1)
+```
+
+# Number of peptides in the control and HF3-treated samples per condition
+
+```{r}
+#| label: fig-peptide
+#| fig-cap: "Number of PSMs in the control and HF3-treated samples per condition"
+#| fig.width: 12
+#| fig.height: 10
+#| layout-nrow: 2
+all_psm_data %>%
+    group_by(Sample, Condition) %>%
+    summarise(n_peptides = n()) %>%
+    kbl(caption = "Number of peptides in the control and HF3-treated samples per condition") %>%
+    kable_classic(
+        full_width = FALSE,
+        font_size = 20
+    )
+
+F2 <- all_psm_data %>%
+    group_by(Sample, Condition) %>%
+    summarise(n_peptides = n()) %>%
+    ggplot(aes(x = Sample, y = n_peptides, fill = Condition)) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(label = n_peptides),
+        vjust = -.1,
+        hjust = 0.5,
+        size = 8
+    ) +
+    scale_fill_manual(values = c("#EFC000FF", "#CD534CFF")) +
+    theme(
+        axis.text.y = element_text(color = "black"),
+        axis.text.x = element_text(
+            angle = 90,
+            hjust = 1, vjust = 0.5, color = "black"
+        ),
+        text = element_text(size = 35),
+        legend.position = "top"
+    ) +
+    labs(
+        fill = NULL,
+        x = NULL,
+        y = "Number of PSMs"
+    )
+
+print(F2)
+```
+
+# Mass over charge (m/z) of the peptides in the control and HF3-treated samples per retention time (minutes)
+
+```{r}
+#| label: fig-mz
+#| fig-cap: "m/z of the peptides in the control and HF3-treated samples throughout the retention time"
+#| fig.width: 15
+#| fig.height: 8
+F3 <- all_psm_data %>%
+    ggplot(aes(
+        x = retention / 60,
+        y = observed_m_z,
+        color = Condition
+    )) +
+    geom_point(alpha = .5, size = 3) +
+    guides(
+        colour = guide_legend(override.aes = list(size = 10)),
+        size = FALSE
+    ) +
+    scale_color_manual(values = c("#EFC000FF", "#CD534CFF")) +
+    theme(
+        axis.text.y = element_text(color = "black"),
+        axis.text.x = element_text(
+            angle = 90,
+            hjust = 1, vjust = 0.5,
+            color = "black"
+        ),
+        text = element_text(size = 35)
+    ) +
+    labs(
+        color = NULL,
+        x = "Retention time (min)",
+        y = "m/z (Th)"
+    )
+
+print(F3)
+```
+
+# Top N proteins with more PSMs in the control
+
+```{r}
+#| label: fig-top-proteins
+#| fig-cap: "Top 10 proteins with more PSMs in the control"
+#| fig.width: 15
+#| fig.height: 8
+F4 <- unique_in_control_samples %>%
+    group_by(entry_name) %>%
+    summarise(n_peptides = n()) %>%
+    arrange(desc(n_peptides)) %>%
+    head(10) %>%
+    mutate(entry_name = factor(entry_name,
+        levels = entry_name
+    )) %>%
+    ggplot(aes(
+        x = entry_name,
+        y = n_peptides
+    )) +
+    geom_bar(
+        stat = "identity",
+        fill = "#EFC000FF"
+    ) +
+    coord_flip() +
+    geom_text(aes(label = n_peptides),
+        vjust = .5,
+        hjust = -.2,
+        size = 9,
+        family = "bold"
+    ) +
+    theme(
+        axis.text.x = element_text(
+            color = "black",
+            hjust = 1, vjust = 0.5
+        ),
+        text = element_text(size = 35),
+        axis.text.y = element_text(
+            face = "bold",
+            color = "black"
+        )
+    ) +
+    labs(
+        x = "Protein",
+        y = "Number of peptides"
+    )
+
+print(F4)
+
+# peptide table unique in control samples
+control_table <-
+    unique_in_control_samples %>%
+    group_by(entry_name) %>%
+    summarise(n_peptides = n()) %>%
+    arrange(desc(n_peptides)) %>%
+    head(10) %>%
+    left_join(unique_in_control_samples[, c(3,5,22,32,33,35)],
+                by = "entry_name",
+                multiple = "all")
+
+view(control_table)
+
+write.csv(control_table, "control_table.csv", row.names = FALSE)
+```
+
+# Top N proteins with more PSMs in the HF3-treated
+
+```{r}
+#| fig-cap: "Top 10 proteins with more PSMs in the HF3-treated"
+#| fig.width: 15
+#| fig.height: 8
+F5 <- unique_in_treated_samples %>%
+    group_by(entry_name) %>%
+    summarise(n_peptides = n()) %>%
+    arrange(desc(n_peptides)) %>%
+    head(10) %>%
+    mutate(entry_name = factor(entry_name,
+        levels = entry_name
+    )) %>%
+    ggplot(aes(
+        x = entry_name,
+        y = n_peptides
+    )) +
+    geom_bar(
+        stat = "identity",
+        fill = "#CD534CFF"
+    ) +
+    coord_flip() +
+    geom_text(aes(label = n_peptides),
+        vjust = .5,
+        hjust = -.2,
+        size = 9,
+        family = "bold",
+        color = "black"
+    ) +
+    theme(
+        axis.text.x = element_text(
+            color = "black",
+            hjust = 1, vjust = 0.5
+        ),
+        text = element_text(size = 35),
+        axis.text.y = element_text(
+            color = "black",
+            face = "bold"
+        )
+    ) +
+    labs(
+        x = "Protein",
+        y = "Number of peptides"
+    )
+
+print(F5)
+
+# peptide table unique in treated samples
+treated_table <-
+    unique_in_treated_samples %>%
+    group_by(entry_name) %>%
+    summarise(n_peptides = n()) %>%
+    arrange(desc(n_peptides)) %>%
+    head(25) %>%
+    left_join(unique_in_treated_samples[, c(3,5,22,32,33,35)],
+                by = "entry_name",
+                multiple = "all")
+
+view(treated_table)
+
+write.csv(treated_table, "treated_table.csv", row.names = FALSE)
+```
+
+# Intensity of the peptides over the retention time by condition
+
+```{r}
+#| label: fig-intensity
+#| fig-cap: "Intensity of the peptides over the retention time by condition"
+#| fig.width: 15
+#| fig.height: 8
+F6 <- all_psm_data %>%
+    ggplot(aes(
+        x = retention / 60,
+        y = intensity,
+        color = Condition
+    )) +
+    geom_line(alpha = .8, size = 2) +
+    scale_color_manual(values = c("#EFC000FF", "#CD534CFF")) +
+    guides(
+        colour = guide_legend(override.aes = list(size = 25)),
+        size = FALSE
+    ) +
+    theme(
+        axis.text.y = element_text(color = "black"),
+        axis.text.x = element_text(
+            angle = 90, color = "black",
+            hjust = 1, vjust = 0.5
+        ),
+        text = element_text(size = 35),
+        legend.position = "top"
+    ) +
+    labs(
+        color = NULL,
+        x = "Retention time (min)",
+        y = "log2(intensity)"
+    )
+
+print(F6)
+```
+
+# Grouping by assigned_modifications that contain the N-term(42.0106) modification per condition
+Counting the number of peptides with the N-term(42.0106) modification, with the Q(-17.0265) modification, and with M(15.9949) modification.
+
+```{r}
+# peptides with N-term(42.0106) modification (acetylation of the N-terminus)
+all_peptides_data %>%
+    filter(str_detect(assigned_modifications, "N-term\\(42.0106\\)",
+        negate = FALSE
+    )) %>%
+    group_by(Condition, assigned_modifications) %>%
+    summarise(psm = n()) %>%
+    summarise(total = sum(psm)) %>%
+    paste0("Peptides with N-term(42.0106) modification: ", .)
+
+# peptides with Q(-17.0265) modification (deamidation of Q)
+all_peptides_data %>%
+    filter(str_detect(assigned_modifications, "Q\\(-17.0265\\)",
+        negate = FALSE
+    )) %>%
+    group_by(Condition, assigned_modifications) %>%
+    summarise(psm = n()) %>%
+    summarise(total = sum(psm)) %>%
+    paste0("Peptides with Q(-17.0265) modification: ", .)
+
+# peptides with M(15.9949) modification (oxidation of M)
+all_peptides_data %>%
+    filter(str_detect(assigned_modifications, "M\\(15.9949\\)",
+        negate = FALSE
+    )) %>%
+    group_by(Condition, assigned_modifications) %>%
+    summarise(psm = n()) %>%
+    summarise(total = sum(psm)) %>%
+    paste0("Peptides with M(15.9949) modification: ", .)
+
+# summary of the peptides with the N-term(42.0106) modification, with the Q(-17.0265) modification, and with M(15.9949) modification
+all_peptides_data %>%
+    mutate(
+        acetylation = str_detect(assigned_modifications, "N-term\\(42.0106\\)",
+            negate = FALSE
+        ),
+        deamidation = str_detect(assigned_modifications, "Q\\(-17.0265\\)",
+            negate = FALSE
+        ),
+        oxidation = str_detect(assigned_modifications, "M\\(15.9949\\)",
+            negate = FALSE
+        )
+    ) %>%
+    group_by(Condition, acetylation, deamidation, oxidation) %>%
+    summarise(peptide = n()) %>%
+    mutate(
+        acetylation = ifelse(acetylation == TRUE, "Acetylation", ""),
+        deamidation = ifelse(deamidation == TRUE, "Deamidation", ""),
+        oxidation = ifelse(oxidation == TRUE, "Oxidation", "")
+    ) %>%
+    group_by(Condition, acetylation, deamidation, oxidation) %>%
+    summarise(peptide = sum(peptide)) %>%
+    mutate(
+        acetylation = factor(acetylation, levels = c("Acetylation", "")),
+        deamidation = factor(deamidation, levels = c("Deamidation", "")),
+        oxidation = factor(oxidation, levels = c("Oxidation", ""))
+    ) %>%
+    pivot_wider(
+        names_from = c("acetylation", "deamidation", "oxidation"),
+        values_from = peptide
+    ) %>%
+    mutate(Condition = factor(Condition, levels = c("HF3-treated", "Control"))) %>%
+    arrange(Condition) %>%
+    kbl(., caption = "Summary of the peptides with the N-term(42.0106) modification, with the Q(-17.0265) modification, and with M(15.9949) modification") %>%
+    kable_classic(full_width = FALSE, position = "center", font_size = 12)
+```
+
+# Number of peptides with the N-term(42.0106) modification per condition
+
+```{r}
+#| label: fig-acetylation
+#| fig-cap: "Number of peptides with the N-term(42.0106) modification per condition"
+#| fig.width: 15
+#| fig.height: 10
+#| layout-ncol: 2
+F7 <- all_peptides_data %>%
+    filter(str_detect(assigned_modifications, "N-term\\(42.0106\\)",
+        negate = FALSE
+    )) %>%
+    group_by(Condition) %>%
+    summarise(
+        psm = n()
+    ) %>%
+    ggplot(aes(x = Condition, y = psm)) +
+    geom_bar(stat = "identity", fill = c("#EFC000FF", "#CD534CFF")) +
+    geom_text(aes(label = psm), vjust = -0.25, size = 10) +
+    theme(
+        axis.text.y = element_text(color = "black"),
+        axis.text.x = element_text(
+            angle = 90, color = "black",
+            hjust = 1, vjust = 0.5
+        ),
+        text = element_text(size = 35)
+    ) +
+    labs(
+        x = NULL,
+        y = "Number of peptides"
+    )
+
+F7b <- all_psm_data %>%
+    filter(str_detect(assigned_modifications, "N-term\\(42.0106\\)",
+        negate = FALSE
+    )) %>%
+    group_by(Condition) %>%
+    summarise(
+        psm = n()
+    ) %>%
+    ggplot(aes(x = Condition, y = psm)) +
+    geom_bar(stat = "identity", fill = c("#EFC000FF", "#CD534CFF")) +
+    geom_text(aes(label = psm), vjust = -0.25, size = 10) +
+    theme(
+        axis.text.y = element_text(color = "black"),
+        axis.text.x = element_text(
+            angle = 90, color = "black",
+            hjust = 1, vjust = 0.5
+        ),
+        text = element_text(size = 35)
+    ) +
+    labs(
+        x = NULL,
+        y = "Number of PSMs"
+    )
+
+print(F7)
+print(F7b)
+```
+
+# Predicted biological activity of the peptides
+
+```{r}
+#| label: fig-biological-activity
+#| fig-cap: "Predicted biological activity of the peptides"
+#| fig.width: 15
+#| fig.height: 9
+peptide_activity <- read.delim("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/biological_activity.txt")
+peptide_hf3_activity <- read.delim("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/peptide_hf3.txt")
+
+# find peptides that are in peptide_hf3_activity and in unique_in_treated_samples
+peptide_hf3_activity %>%
+    filter(peptide %in% unique_in_treated_samples$peptide) %>%
+    group_by(peptide) %>%
+    summarise(n_peptide = n()) %>%
+    summarise(total = sum(n_peptide)) %>%
+    paste0("Total peptides with biological activity: ", .)
+
+F8 <- peptide_activity %>%
+    arrange(desc(number)) %>%
+    mutate(activity = factor(activity, levels = activity)) %>%
+    ggplot(aes(x = activity, y = number)) +
+    geom_col(fill = "#CD534CFF") +
+    coord_flip() +
+    geom_text(aes(label = number),
+        vjust = .5,
+        hjust = -.1,
+        size = 6,
+        family = "bold",
+        color = "black"
+    ) +
+    theme(
+        axis.text.x = element_text(
+            angle = 90, color = "black",
+            hjust = 1, vjust = 0.5
+        ),
+        text = element_text(size = 35),
+        axis.text.y = element_text(
+            color = "black",
+            face = "bold"
+        )
+    ) +
+    labs(
+        x = "Biological activity",
+        y = "Number of peptides"
+    )
+
+print(F8)
+```
+
+# Saving all PSMs in tables
+
+```{r}
+#| echo: true
+# write.xlsx(FP_c1, "C1_PSM.xlsx")
+# write.xlsx(FP_c2, "C2_PSM.xlsx")
+# write.xlsx(FP_c3, "C3_PSM.xlsx")
+# write.xlsx(FP_t1, "T1_PSM.xlsx")
+# write.xlsx(FP_t2, "T2_PSM.xlsx")
+# write.xlsx(FP_t3, "T3_PSM.xlsx")
+```
+
+# Mass over charge (m/z) over retention time (minutes) for all the peptide spectra in the control and HF3-treated samples
+
+```{r}
+#| label: fig-mz-rt
+#| fig-cap: "Mass over charge (m/z) over retention time (minutes) for all the peptide spectra in the control and HF3-treated samples"
+#| fig.width: 10
+#| fig.height: 8
+#| layout-ncol: 2
+F9 <- peptide_control %>%
+    ggplot(aes(
+        x = retention / 60,
+        y = observed_m_z,
+        color = Sample
+    )) +
+    geom_point(alpha = .5, size = 5) +
+    guides(colour = guide_legend(override.aes = list(size = 6)), size = FALSE) +
+    theme(
+        text = element_text(size = 20),
+        legend.position = "bottom"
+    ) +
+    labs(
+        color = NULL,
+        x = "Retention time (min)",
+        y = "m/z"
+    ) +
+    scale_color_manual(values = c("black", "#EFC000FF", "#CD534CFF"))
+
+F10 <- peptide_treated %>%
+    ggplot(aes(
+        x = retention / 60,
+        y = observed_m_z,
+        color = Sample
+    )) +
+    geom_point(alpha = .5, size = 5) +
+    guides(colour = guide_legend(override.aes = list(size = 6)), size = FALSE) +
+    theme_classic() +
+    theme(
+        text = element_text(size = 20),
+        legend.position = "bottom"
+    ) +
+    labs(
+        color = NULL,
+        x = "Retention time (min)",
+        y = "m/z"
+    ) +
+    scale_color_manual(values = c("black", "#EFC000FF", "#CD534CFF"))
+
+print(F9)
+print(F10)
+```
+
+# Peptide length distribution as found by FragPipe using the unespecific search with peptide range from 7 to 65 amino acids
+
+```{r}
+#| label: fig-peptide-length
+#| fig-cap: "Peptide length distribution as found by FragPipe using the unespecific search with peptide range from 7 to 65 amino acids"
+#| fig.width: 15
+#| fig.height: 8
+#| layout-ncol: 2
+
+# calculate the frequency of peptides longer than 20 amino acids in the control samples
+paste0(
+    "Peptides longer than 20 amino acids (control): ",
+    round(sum(peptide_control$peptide_length > 20) / sum(nrow(peptide_control)) * 100, 2), "%"
+)
+
+F11 <- peptide_control %>%
+    ggplot(aes(
+        x = peptide_length,
+        color = Sample
+    )) +
+    geom_density(size = 2) +
+    theme(
+        axis.text.y = element_text(color = "black"),
+        axis.text.x = element_text(color = "black"),
+        text = element_text(size = 35, color = "black"),
+        legend.position = "bottom"
+    ) +
+    labs(
+        color = NULL,
+        x = "Peptide length",
+        y = "Frequency"
+    ) +
+    geom_vline(
+        xintercept = 20,
+        linetype = "dashed",
+        color = "black"
+    ) +
+    scale_color_manual(values = c(
+        "black",
+        "#EFC000FF",
+        "#CD534CFF"
+    )) +
+    annotate("text",
+        x = 25, y = 0.05,
+        label = "Peptides longer than\n 20 amino acids (11%)",
+        color = "black",
+        size = 9
+    )
+
+# looking at the peptides longer than 20 amino acids
+# peptide_control %>%
+#    filter(peptide_length > 20) %>%
+#    kbl(
+#        caption = "Peptides longer than 20 amino acids - control samples",
+#        align = "c") %>%
+#    kable_classic(full_width = FALSE, html_font = "Cambria")
+
+# calculate the frequency of peptides longer than 20 amino acids in the HF3-treated samples
+
+paste0(
+    "Peptides longer than 20 amino acids (HF3-treated): ",
+    round(sum(peptide_treated$peptide_length > 20) / sum(nrow(peptide_treated)) * 100, 2), "%"
+)
+
+F12 <- peptide_treated %>%
+    ggplot(aes(
+        x = peptide_length,
+        color = Sample
+    )) +
+    geom_density(size = 2) +
+    theme(
+        axis.text.y = element_text(color = "black"),
+        axis.text.x = element_text(color = "black"),
+        text = element_text(size = 35, color = "black"),
+        legend.position = "bottom"
+    ) +
+    labs(
+        color = NULL,
+        x = "Peptide length",
+        y = "Frequency"
+    ) +
+    geom_vline(
+        xintercept = 20,
+        linetype = "dashed",
+        color = "black"
+    ) +
+    scale_color_manual(values = c(
+        "black",
+        "#EFC000FF",
+        "#CD534CFF"
+    )) +
+    annotate("text",
+        x = 25,
+        y = 0.05,
+        label = "Peptides longer than\n 20 amino acids (13%)",
+        color = "black",
+        size = 10
+    )
+
+# looking at the peptides longer than 20 amino acids
+# peptide_treated %>%
+#    filter(peptide_length > 20) %>%
+#    kbl(
+#        caption = "Peptides longer than 20 amino acids - HF3-treated samples",
+#        align = "c") %>%
+#    kable_classic(
+#        full_width = FALSE,
+#        html_font = "Cambria")
+
+print(F11)
+print(F12)
+```
+
+# MS1 intensity over retention time (minutes) per replicate of the control samples
+
+```{r}
+#| label: fig-ms1-intensity-control
+#| fig-cap: MS1 intensity over retention time (minutes) per replicate of the control  and HF3- treated samples
+#| fig.height: 8
+#| fig.width: 10
+#| layout-ncol: 2
+# controls
+F13 <- peptide_control %>%
+    ggplot(aes(
+        x = retention / 60,
+        y = intensity,
+        color = Sample
+    )) +
+    geom_line(size = 1.5) +
+    guides(
+        colour = guide_legend(override.aes = list(size = 15)),
+        size = FALSE
+    ) +
+    theme(
+        axis.text.x = element_text(
+            angle = 90,
+            hjust = 1,
+            vjust = 0.5
+        ),
+        text = element_text(size = 20),
+        legend.position = "bottom"
+    ) +
+    labs(
+        color = NULL,
+        x = "Retention time (min)",
+        y = "Intensity"
+    ) +
+    scale_color_manual(values = c(
+        "black",
+        "#EFC000FF",
+        "#CD534CFF"
+    )) +
+    scale_x_continuous(
+        limits = c(20, 90),
+        breaks = seq(20, 90, 10)
+    )
+
+# HF3-treated
+F14 <- peptide_treated %>%
+    ggplot(aes(
+        x = retention / 60,
+        y = intensity,
+        color = Sample
+    )) +
+    geom_line(size = 1.5) +
+    guides(
+        colour = guide_legend(override.aes = list(size = 15)),
+        size = FALSE
+    ) +
+    theme(
+        axis.text.x = element_text(
+            angle = 90,
+            hjust = 1,
+            vjust = 0.5
+        ),
+        text = element_text(size = 20),
+        legend.position = "bottom"
+    ) +
+    labs(
+        color = NULL,
+        x = "Retention time (min)",
+        y = "Intensity"
+    ) +
+    scale_color_manual(values = c(
+        "black",
+        "#EFC000FF",
+        "#CD534CFF"
+    )) +
+    scale_x_continuous(
+        limits = c(20, 110),
+        breaks = seq(20, 110, 10)
+    )
+
+print(F13)
+print(F14)
+```
+
+# Venn diagram of PSMs found in each sample per condition
+
+```{r}
+#| label: venn-diagram
+#| fig-cap: Venn diagram of PSMs found in each sample per condition
+#| fig.height: 8
+#| fig.width: 8
+#| layout-ncol: 2
+list_of_peptides_in_control <- list(
+    "Control 1" = unique(FP_c1$peptide),
+    "Control 2" = unique(FP_c2$peptide),
+    "Control 3" = unique(FP_c3$peptide)
+)
+
+plot(euler(list_of_peptides_in_control, shape = "circle"),
+    quantities = TRUE,
+    main = "Peptides found in each sample - control",
+    col = c("#86868699", "#CD534C99", "#EFC000FF"),
+    fill = c("#86868699", "#CD534C99", "#EFC000FF"),
+    alpha = 0.5, cex.lab = 3
+)
+
+list_of_peptides_in_treated <- list(
+    "HF3-treated 1" = unique(FP_t1$peptide),
+    "HF3-treated 2" = unique(FP_t2$peptide),
+    "HF3-treated 3" = unique(FP_t3$peptide)
+)
+
+plot(euler(list_of_peptides_in_treated, shape = "circle"),
+    quantities = TRUE,
+    main = "Peptides found in each sample - HF3-treated",
+    col = c("#86868699", "#CD534C99", "#EFC000FF"),
+    fill = c("#86868699", "#CD534C99", "#EFC000FF"),
+    alpha = 0.5, cex.lab = 3
+)
+```
+
+# Venn diagram of peptides detected in all samples per condition
+
+```{r}
+#| label: venn-diagram-peptides
+#| fig-cap: Venn diagram of peptides detected in all samples per condition
+#| fig.height: 8
+#| fig.width: 8
+list_of_peptides_control <- peptide_control %>%
+    select(peptide)
+
+list_of_peptide_treated <- peptide_treated %>%
+    select(peptide)
+
+venn_plot <- list(
+    "Control" = list_of_peptides_control$peptide,
+    "HF3-treated" = list_of_peptide_treated$peptide
+)
+
+plot(euler(venn_plot, shape = "circle"),
+    quantities = TRUE,
+    col = c("#EFC000FF", "#CD534CFF"),
+    fill = c("#EFC000FF", "#CD534CFF"),
+    alpha = 0.5
+)
+```
+
+# heatmap of protease fingerprint for each sample
+
+```{r}
+#| fig-cap: heatmap of protease fingerprint for each sample
+#| fig-subcap:
+#| -  "Fingerprint - Control 1"
+#| -  "Fingerprint - Control 2"
+#| -  "Fingerprint - Control 3"
+#| -  "Fingerprint - HF3-treated 1"
+#| -  "Fingerprint - HF3-treated 2"
+#| -  "Fingerprint - HF3-treated 3"
+#| fig.height: 10
+#| fig.width: 8
+#| layout-nrow: 2
+pics_c1 <- read.delim("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/tabelasfragpipeamanda/PICS/Relative_occurences_C1.txt") %>%
+    column_to_rownames("AA") %>%
+    rename(
+        P6 = P6, P5 = P5, P4 = P4, P3 = P3, P2 = P2, P1 = P1,
+        "P1'" = P1prime, "P2'" = P2prime, "P3'" = P3prime, "P4'" = P4prime, "P5'" = P5prime, "P6'" = P6prime
+    ) %>%
+    pheatmap(
+        cluster_rows = FALSE,
+        cluster_cols = FALSE,
+        fontsize = 20,
+        show_rownames = TRUE,
+        show_colnames = TRUE,
+        color = colorRampPalette(c("grey95", "#A73030FF"))(6),
+        main = "Control (rep 1)",
+        gaps_col = 6
+    )
+
+pics_c2 <- read.delim("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/tabelasfragpipeamanda/PICS/Relative_occurences_C2.txt") %>%
+    column_to_rownames("AA") %>%
+    rename(
+        P6 = P6, P5 = P5, P4 = P4, P3 = P3, P2 = P2, P1 = P1,
+        "P1'" = P1prime, "P2'" = P2prime, "P3'" = P3prime, "P4'" = P4prime, "P5'" = P5prime, "P6'" = P6prime
+    ) %>%
+    pheatmap(
+        cluster_rows = FALSE,
+        cluster_cols = FALSE,
+        fontsize = 20,
+        show_rownames = TRUE,
+        show_colnames = TRUE,
+        color = colorRampPalette(c("grey95", "#A73030FF"))(6),
+        main = "Control (rep 2)",
+        gaps_col = 6
+    )
+
+pics_c3 <- read.delim("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/tabelasfragpipeamanda/PICS/Relative_occurences_C3.txt") %>%
+    column_to_rownames("AA") %>%
+    rename(
+        P6 = P6, P5 = P5, P4 = P4, P3 = P3, P2 = P2, P1 = P1,
+        "P1'" = P1prime, "P2'" = P2prime, "P3'" = P3prime, "P4'" = P4prime, "P5'" = P5prime, "P6'" = P6prime
+    ) %>%
+    pheatmap(
+        cluster_rows = FALSE,
+        cluster_cols = FALSE,
+        fontsize = 20,
+        show_rownames = TRUE,
+        show_colnames = TRUE,
+        color = colorRampPalette(c("grey95", "#A73030FF"))(6),
+        main = "Control (rep 3)",
+        gaps_col = 6
+    )
+
+pics_t1 <- read.delim("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/tabelasfragpipeamanda/PICS/Relative_occurences_T1.txt") %>%
+    column_to_rownames("AA") %>%
+    rename(
+        P6 = P6, P5 = P5, P4 = P4, P3 = P3, P2 = P2, P1 = P1,
+        "P1'" = P1prime, "P2'" = P2prime, "P3'" = P3prime, "P4'" = P4prime, "P5'" = P5prime, "P6'" = P6prime
+    ) %>%
+    pheatmap(
+        cluster_rows = FALSE,
+        cluster_cols = FALSE,
+        fontsize = 20,
+        show_rownames = TRUE,
+        show_colnames = TRUE,
+        color = colorRampPalette(c("grey95", "#A73030FF"))(6),
+        main = "HF3-treated (rep 1)",
+        gaps_col = 6
+    )
+
+pics_t2 <- read.delim("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/tabelasfragpipeamanda/PICS/Relative_occurences_T2.txt") %>%
+    column_to_rownames("AA") %>%
+    rename(
+        P6 = P6, P5 = P5, P4 = P4, P3 = P3, P2 = P2, P1 = P1,
+        "P1'" = P1prime, "P2'" = P2prime, "P3'" = P3prime, "P4'" = P4prime, "P5'" = P5prime, "P6'" = P6prime
+    ) %>%
+    pheatmap(
+        cluster_rows = FALSE,
+        cluster_cols = FALSE,
+        fontsize = 20,
+        show_rownames = TRUE,
+        show_colnames = TRUE,
+        color = colorRampPalette(c("grey95", "#A73030FF"))(6),
+        main = "HF3-treated (rep 2)",
+        gaps_col = 6
+    )
+
+pics_t3 <- read.delim("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/tabelasfragpipeamanda/PICS/Relative_occurences_T3.txt") %>%
+    column_to_rownames("AA") %>%
+    rename(
+        P6 = P6, P5 = P5, P4 = P4, P3 = P3, P2 = P2, P1 = P1,
+        "P1'" = P1prime, "P2'" = P2prime, "P3'" = P3prime, "P4'" = P4prime, "P5'" = P5prime, "P6'" = P6prime
+    ) %>%
+    pheatmap(
+        cluster_rows = FALSE,
+        cluster_cols = FALSE,
+        fontsize = 22,
+        show_rownames = TRUE,
+        show_colnames = TRUE,
+        color = colorRampPalette(c("grey95", "#A73030FF"))(6),
+        main = "HF3-treated (rep 3)",
+        gaps_col = 6
+    )
+```
+
+# Proportional Venn diagram for proteins infered from peptides which show up only in one condition
+
+```{r}
+#| fig-cap: "Venn diagram showing the number of proteins that were found to be degraded in only one condition. The number of proteins found in each condition is shown in the legend."
+#| fig.height: 8
+#| fig.width: 8
+list_of_proteins_control <- unique_in_control_samples %>%
+    select(protein_id) %>%
+    distinct(protein_id, .keep_all = TRUE)
+
+list_of_proteins_treated <- unique_in_treated_samples %>%
+    select(protein_id) %>%
+    distinct(protein_id, .keep_all = TRUE)
+
+intersect(list_of_proteins_control$protein_id, list_of_proteins_treated$protein_id) %>%
+    length() %>%
+    paste0(" proteins were found to be degraded in both conditions")
+
+venn_plot_proteins <- list(
+    "Control" = list_of_proteins_control$protein_id,
+    "HF3-treated" = list_of_proteins_treated$protein_id
+)
+
+plot(euler(venn_plot_proteins, shape = "circle"),
+    quantities = TRUE,
+    col = c("#EFC000FF", "#CD534CFF"),
+    fill = c("#EFC000FF", "#CD534CFF"),
+    alpha = 0.5,
+    label = NULL
+)
+
+# common_proteins <- intersect(
+#    list_of_proteins_control$protein_id,
+#    list_of_proteins_treated$protein_id
+# ) %>%
+#    data.frame() %>%
+#    write_tsv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/list_of_proteins.tsv")
+# colnames(common_proteins) <- "protein_id"
+# common_proteins_degraded <- left_join(common_proteins, all_psm_data, by = "protein_id")
+```
+
+## KEGG pathway enrichment analysis for proteins found in control and HF-treated samples
+
+```{r}
+#| label: KEGG_pathway_enrichment
+#| fig-cap: "KEGG pathway enrichment analysis for proteins found degraded in control samples. The size of the points represents the number of genes in the pathway and the color represents the -log10 of the FDR."
+#| fig.subcap:
+#| - "A. Control samples"
+#| - "B. HF3-treated samples"
+#| fig.height: 10
+#| fig.width: 15
+#| layout-ncol: 2
+KEGG_annotation_control <- read.csv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/KEGG_unique_control.csv") %>%
+    clean_names()
+KEGG_annotation_hf3 <- read.csv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/KEGG_unique_hf3.csv") %>%
+    clean_names()
+
+# KEGG pathway enrichment analysis for proteins found degraded in control samples
+F15 <- KEGG_annotation_control %>%
+    filter(enrichment_fdr < 0.05) %>%
+    mutate(pathway = factor(pathway, levels = pathway[order(fold_enrichment)])) %>%
+    ggplot(aes(
+        x = pathway,
+        y = fold_enrichment,
+        size = n_genes,
+        color = -log10(enrichment_fdr)
+    )) +
+    geom_point() +
+    scale_size(range = c(2, 10)) +
+    coord_flip() +
+    scale_colour_gradient(low = "grey70", high = "#EFC000FF") +
+    theme_bw() +
+    theme(
+        axis.text.y = element_text(color = "black"),
+        axis.text.x = element_text(color = "black"),
+        legend.position = "right",
+        text = element_text(size = 28)) +
+    labs(
+        size = "Number of genes",
+        color = "-log10(FDR)",
+        x = "KEGG pathway",
+        y = "Fold enrichment")
+
+# KEGG pathway enrichment analysis for proteins found degraded in HF3-treated samples
+F16 <- KEGG_annotation_hf3 %>%
+    filter(enrichment_fdr < 0.05) %>%
+    mutate(pathway = factor(pathway, levels = pathway[order(fold_enrichment)])) %>%
+    ggplot(aes(
+        x = pathway,
+        y = fold_enrichment,
+        size = n_genes,
+        color = -log10(enrichment_fdr)
+    )) +
+    geom_point() +
+    scale_size(range = c(8, 15)) +
+    coord_flip() +
+    scale_colour_gradient(low = "grey70", high = "#CD534CFF") +
+    theme_bw() +
+    theme(
+        axis.text.y = element_text(color = "black"),
+        axis.text.x = element_text(color = "black"),
+        legend.position = "right",
+        text = element_text(size = 35, face = "bold")) +
+    labs(
+        size = "Number of genes",
+        color = "-log10(FDR)",
+        x = "KEGG pathway",
+        y = "Fold enrichment")
+
+print(F15)
+print(F16)
+ggsave(F16, filename = "KEGG_pathway_enrichment_hf3.png",
+                width = 20, height = 10, unit = "in", dpi = 300)
+```
+
+# Network analysis of proteins found degraded in control and HF3-treated samples
+
+```{r}
+#| label: network_analysis
+#| fig-cap: "Network analysis of proteins found degraded in control and HF3-treated samples. The size of the nodes represents the number of connections and the color represents the importance of the connection."
+#| fig.subcap:
+#| - "A. Control samples"
+#| - "B. HF3-treated samples"
+#| fig.height: 10
+#| fig.width: 15
+#| layout-ncol: 2
+network_edges_control <- read.csv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/network_edges_control.csv") %>%
+    clean_names() %>%
+    rename(source = from, target = to, importance = width)
+network_nodes_control <- read.csv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/network_nodes_control.csv") %>%
+    clean_names() %>%
+    rename(name = id) %>%
+    select(name, size)
+
+network_edges_hf3 <- read.csv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/network_edges_hf3.csv") %>%
+    clean_names() %>%
+    rename(source = from, target = to, importance = width)
+network_nodes_hf3 <- read.csv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/network_nodes_hf3.csv") %>%
+    clean_names() %>%
+    rename(name = id) %>%
+    select(name, size)
+
+network_control <- graph_from_data_frame(
+    d = network_edges_control,
+    directed = FALSE,
+    vertices = network_nodes_control)
+
+network_hf3 <- graph_from_data_frame(
+    d = network_edges_hf3,
+    directed = FALSE,
+    vertices = network_nodes_hf3)
+
+plot(network_control,
+    layout = layout_with_kk,
+    vertex.size = 20,
+    vertex.label = network_nodes_control$name,
+    vertex.label.family = "Cambria",
+    vertex.label.cex = 1.5,
+    vertex.label.color = "black",
+    vertex.label.dist = 4,
+    vertex.color = "#EFC000FF",
+    edge.width = E(network_control)$importance * 2,
+    edge.width = 0.5,
+    edge.curved = .2,
+    edge.color = "grey85")
+
+plot(network_hf3,
+    layout = layout_with_kk,
+    vertex.size = 20,
+    vertex.label = network_nodes_hf3$name,
+    vertex.label.family = "Cambria",
+    vertex.label.cex = 2,
+    vertex.label.color = "black",
+    vertex.label.dist = 7,
+    vertex.color = "#CD534CFF",
+    edge.width = E(network_hf3)$importance * 2,
+    edge.width = 0.5,
+    edge.curved = .2,
+    edge.color = "grey85") +
+    geom_label(aes(x = x, y = y, label = network_nodes_hf3$name), nudge_y = 0.1, label.size = NA)
+```
+
+```{r}
+# list of peptides with N-term acetyl assigned modifications (N-term(42.0106))
+
+df1 <- peptide_treated %>%
+    filter(str_detect(assigned_modifications, "N-term\\(42.0106\\)",
+        negate = FALSE
+    )) %>%
+    select(protein, peptide, protein_start, protein_end)
+
+df1 %>%
+    write.csv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/peptides_n_term_acetyl_hf3.csv")
+
+view(df1)
+
+df2 <- peptide_control %>%
+    filter(str_detect(assigned_modifications, "N-term\\(42.0106\\)",
+        negate = FALSE
+    )) %>%
+    select(protein, peptide, protein_start, protein_end)
+
+df2 %>%
+    write.csv("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/peptides_n_term_acetyl_control.csv")
+    
+view(df2)
+
+venn_n_term_acetyl <- list(
+    "Control" = df2$peptide,
+    "HF3-treated" = df1$peptide)
+
+plot(euler(venn_n_term_acetyl, shape = "circle"),
+    quantities = TRUE,
+    col = c("#EFC000FF", "#CD534CFF"),
+    fill = c("#EFC000FF", "#CD534CFF"),
+    alpha = 0.5,
+    label = c("Control", "HF3-treated"))
+
+# view the proteins unique in df1 which are not in df2
+unique_in_treated_acetyl <- df1 %>%
+    filter(!(peptide %in% df2$peptide))
+
+view(unique_in_treated_acetyl)
+
+unique_in_treated_acetyl %>%
+    group_by(protein) %>%
+    summarise(n = n()) %>%
+    arrange(desc(n)) %>%
+    view()
+
+unique_in_treated_acetyl %>%
+    group_by(protein) %>%
+    summarise(n = n()) %>%
+    arrange(desc(n)) %>%
+    ggplot(aes(x = reorder(protein, n), y = n)) +
+    geom_col(fill = "#CD534CFF") +
+    coord_flip() +
+    labs(
+        x = "Protein",
+        y = "Number of peptides",
+        title = "Proteins unique in HF3-treated samples with N-term acetylation") +
+    theme(
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        plot.title = element_text(hjust = 0.5))
+
+unique_in_control_acetyl <- df2 %>%
+    filter(!(peptide %in% df1$peptide))
+
+view(unique_in_control_acetyl)
+
+unique_in_control_acetyl %>%
+    group_by(protein) %>%
+    summarise(n = n()) %>%
+    arrange(desc(n)) %>%
+    view()
+
+unique_in_control_acetyl %>%
+    group_by(protein) %>%
+    summarise(n = n()) %>%
+    arrange(desc(n)) %>%
+    ggplot(aes(x = reorder(protein, n), y = n)) +
+    geom_col(fill = "#EFC000FF") +
+    coord_flip() +
+    labs(
+        x = "Protein",
+        y = "Number of peptides",
+        title = "Proteins unique in control samples with N-term acetylation") +
+    theme(
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        plot.title = element_text(hjust = 0.5))
+
+list_of_acetylated_proteins <- list(
+    "Control" = unique_in_control_acetyl$protein,
+    "HF3-treated" = unique_in_treated_acetyl$protein)
+
+# Venn diagram of proteins with N-term acetylation
+df_prot1 <- df1 %>%
+    group_by(protein) %>%
+    summarise(n = n()) %>%
+    arrange(desc(n))
+
+df_prot2 <- df2 %>%
+    group_by(protein) %>%
+    summarise(n = n()) %>%
+    arrange(desc(n))
+
+list_of_acetylated_proteins <- list(
+    "Control" = df_prot2$protein,
+    "HF3-treated" = df_prot1$protein)
+
+plot(euler(list_of_acetylated_proteins, shape = "circle"),
+    quantities = TRUE,
+    col = c("#EFC000FF", "#CD534CFF"),
+    fill = c("#EFC000FF", "#CD534CFF"),
+    alpha = 0.5
+)
+
+# view the proteins unique in df1 which are not in df2 (HF3-treated)
+df_prot1 %>%
+    filter(!(protein %in% df_prot2$protein)) %>%
+    write.csv("proteins_unique_in_treated_acetyl.csv")
+
+# view the proteins unique in df2 which are not in df1 (control)
+df_prot2 %>%
+    filter(!(protein %in% df_prot1$protein)) %>%
+    write.csv("proteins_ unique_in_control_acetyl.csv")
+```
+
+Platelet aggregation induced by peptide recovered from HF3-treated or control samples
+
+```{r}
+aggregation_data <- read.delim("/Volumes/Expansion/PD/Dados_Amanda/short_communication_Amanda/aggregation.txt")
+
+# summary statistics of the aggregation data
+aggregation_data %>%
+    group_by(condition, concentration) %>%
+    summarise(mean(inhibtion), sd(inhibtion), n()) %>%
+    arrange(condition, concentration) %>%
+    kbl(caption = "Summary statistics of the aggregation data") %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+# Welch's t-test to compare the aggregation of platelets caused by peptides recovered from HF3-treated or control samples
+aggregation_data %>%
+    filter(condition == "Control") %>%
+    t.test(inhibtion ~ as.factor(concentration), data = .)
+
+aggregation_data %>%
+    filter(condition == "HF3-treated") %>%
+    t.test(inhibtion ~ as.factor(concentration), data = .)
+
+aggregation_data %>%
+    filter(concentration == 25) %>%
+    t.test(inhibtion ~ condition, data = .)
+
+aggregation_data %>%
+    filter(concentration == 50) %>%
+    t.test(inhibtion ~ condition, data = .)
+
+# Cohen's d test to measure the effect size of platelet aggregation caused by 50 ug/mL peptides recovered from HF3-treated or control samples
+aggregation_data %>%
+    filter(concentration == 50) %>%
+    cohens_d(inhibtion ~ condition, data = .)
+
+# plot the aggregation data
+ag_plot <- aggregation_data %>%
+    group_by(condition, concentration) %>%
+    summarise(mean(inhibtion), sd(inhibtion), n()) %>%
+    arrange(condition, concentration) %>%
+    ggplot(aes(x = as.factor(concentration),
+                y = `mean(inhibtion)`,
+                fill = condition)) +
+    scale_fill_manual(values = c("#EFC000FF", "#CD534CFF")) +
+    geom_col(position = "dodge") +
+    geom_errorbar(aes(ymin = `mean(inhibtion)` - `sd(inhibtion)`,
+                ymax = `mean(inhibtion)` + `sd(inhibtion)`),
+                width = .2,
+                position = position_dodge(.9)) +
+    theme(
+        axis.text.y = element_text(color = "black"),
+        axis.text.x = element_text(
+            color = "black",
+            angle = 90,
+            hjust = 1,
+            vjust = 0.5),
+        text = element_text(size = 35),
+        axis.title.x = element_text(margin = margin(t = 15)),
+        axis.title.y = element_text(margin = margin(r = 10))
+        ) +
+    labs(fill = NULL,
+        x = " µg peptides/mL",
+        y = "% Inhibition of collagen-\ninduced platelet aggregation")
+
+print(ag_plot)
+```
