@@ -1,0 +1,15 @@
+condition	concentration	inhibtion
+Control	25	0
+Control	25	0
+Control	25	35.6
+Control	50	72.6
+Control	50	55.6
+Control	50	66.7
+HF3-treated	25	23.8
+HF3-treated	25	72.2
+HF3-treated	25	41.7
+HF3-treated	25	41.82
+HF3-treated	50	90
+HF3-treated	50	100
+HF3-treated	50	100
+HF3-treated	50	90.91
